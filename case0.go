@@ -49,16 +49,20 @@ func (c *ConnWriter) Close() error {
 
 type ConnReader struct {
 	conn *Conn
+	buf  *bytes.Buffer
 }
 
 func (c *ConnReader) Read(p []byte) (n int, err error) {
+	if c.buf.Len() > 0 {
+		return c.buf.Read(p)
+	}
 	r := io.LimitReader(c.conn.n, 4)
 	buf, err := io.ReadAll(r)
 	if err != nil {
 		log.Println("read data error:", err)
 		return 0, err
 	}
-	if string(buf) == FIN {
+	if len(buf) == 0 || string(buf) == FIN {
 		return 0, io.EOF
 	}
 	// read 8 more
@@ -70,12 +74,9 @@ func (c *ConnReader) Read(p []byte) (n int, err error) {
 	}
 	num := checkHeader(append(buf, b...))
 	io.LimitReader(c.conn.n, int64(num))
-	w := &bytes.Buffer{}
-	w.Grow(int(num))
-	_, err = io.CopyN(w, c.conn.n, int64(num))
-	n = int(num)
-	copy(p, w.Bytes())
-	return n, nil
+	_, err = io.CopyN(c.buf, c.conn.n, int64(num))
+
+	return c.buf.Read(p)
 }
 
 // Send 传入一个 key 表示发送者将要传输的数据对应的标识；
@@ -127,6 +128,7 @@ func (conn *Conn) Receive() (key string, reader io.Reader, err error) {
 
 	return key, &ConnReader{
 		conn: conn,
+		buf:  &bytes.Buffer{},
 	}, nil
 }
 
